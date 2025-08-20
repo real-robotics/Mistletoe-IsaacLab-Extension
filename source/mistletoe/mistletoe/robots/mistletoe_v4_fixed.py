@@ -8,26 +8,34 @@ dirname, filename = os.path.split(os.path.abspath(__file__))
 
 HAA_ACTUATOR_CFG = ImplicitActuatorCfg(
     joint_names_expr=["HAA.*"],
-    effort_limit=11,
-    velocity_limit=10,
-    stiffness={".*": 100.0},
-    damping={".*": 10.0},
+    effort_limit_sim=1,
+    velocity_limit_sim=1,
+    stiffness={".*": 10.0},
+    damping={".*": 1.0},
+    # each of these are enabled for each test
+    friction={".*": 0.5},
+    # viscous_friction={".*": 1}
+    # dynamic_friction={".*": 10}
 )
 
 KFE_ACTUATOR_CFG = ImplicitActuatorCfg(
     joint_names_expr=["KFE.*"],
-    effort_limit=11*1.5,
-    velocity_limit=10,
-    stiffness={".*": 100.0},
-    damping={".*": 10.0},
+    effort_limit_sim=1*1.5,
+    velocity_limit_sim=1,
+    stiffness={".*": 10.0},
+    damping={".*": 1.0},
+    # friction={".*": 10},
+    # dynamic_friction={".*": 10}
 )
 
 HFE_ACTUATOR_CFG = ImplicitActuatorCfg(
     joint_names_expr=["HFE.*"],
-    effort_limit=11,
-    velocity_limit=10,
-    stiffness={".*": 100.0},
-    damping={".*": 10.0},
+    effort_limit_sim=1,
+    velocity_limit_sim=1,
+    stiffness={".*": 10.0},
+    damping={".*": 1.0},
+    # friction={".*": 10},
+    # dynamic_friction={".*": 10}
 )
 
 #Articulation Configs
@@ -59,15 +67,17 @@ MISTLETOE_CFG = ArticulationCfg(
     ),
 
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.3),
+        pos=(0.0, 0.0, 0),
         joint_pos={
             "HAA.*": 0.0,  # all HAA
+            "HFE.*": 0.0,  # all HAA
+            "KFE.*": 0.0,  # all HAA
 
-            # positive on left, negative on right for both HFE and KFE
-            "HFE_[13]": 0.523599,  
-            "HFE_[24]": -0.523599,  
-            "KFE_[24]": -0.872665,  # right
-            "KFE_[13]": 0.872665,  # left
+            # # positive on left, negative on right for both HFE and KFE
+            # "HFE_[13]": 0.523599,  
+            # "HFE_[24]": -0.523599,  
+            # "KFE_[24]": -0.872665,  # right
+            # "KFE_[13]": 0.872665,  # left
         },
         joint_vel={".*": 0.0},
     ),

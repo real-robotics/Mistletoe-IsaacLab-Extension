@@ -45,6 +45,83 @@ from isaaclab.sim import SimulationContext
 ##
 from mistletoe.robots.mistletoe_v4_fixed import MISTLETOE_CFG
 
+# trapezoid traj configs
+
+import math
+
+import csv
+
+VELOCITY_LIMIT = 0.5 * 2 * math.pi
+ACCELERATION_LIMIT = 2 * 2 * math.pi 
+
+def trapezoidal_trajectory_tensor(x0, xf, v_max, a, dt=0.01, device='cpu'):
+    """
+    Generates a trapezoidal velocity profile as PyTorch tensors.
+
+    Parameters:
+        x0, xf : float
+            Initial and final positions
+        v_max : float
+            Maximum velocity
+        a : float
+            Maximum acceleration
+        dt : float
+            Time step
+        device : str
+            PyTorch device ('cpu' or 'cuda')
+    
+    Returns:
+        t, x, v, acc : torch.Tensor
+            Time, position, velocity, acceleration tensors
+    """
+    D = xf - x0
+
+    t_acc = v_max / a
+    d_acc = 0.5 * a * t_acc**2
+
+    if 2 * d_acc > abs(D):
+        # Triangular profile
+        t_acc = torch.sqrt(torch.tensor(abs(D)/a))
+        t_const = 0
+        v_peak = a * t_acc
+    else:
+        t_const = (abs(D) - 2 * d_acc) / v_max
+        v_peak = v_max
+
+    t_total = 2 * t_acc + t_const
+
+    t = torch.arange(0, t_total + dt, dt, device=device)
+    x = torch.zeros_like(t, device=device)
+    v = torch.zeros_like(t, device=device)
+    acc = torch.zeros_like(t, device=device)
+
+    # Acceleration phase
+    mask_acc = t < t_acc
+    x[mask_acc] = x0 + 0.5 * a * t[mask_acc]**2
+    v[mask_acc] = a * t[mask_acc]
+    acc[mask_acc] = a
+
+    # Constant velocity phase
+    mask_const = (t >= t_acc) & (t < t_acc + t_const)
+    x[mask_const] = x0 + d_acc + v_peak * (t[mask_const] - t_acc)
+    v[mask_const] = v_peak
+    acc[mask_const] = 0
+
+    # Deceleration phase
+    mask_dec = t >= t_acc + t_const
+    t_dec = t[mask_dec] - t_acc - t_const
+    x[mask_dec] = xf - 0.5 * a * (t_total - t[mask_dec])**2
+    v[mask_dec] = v_peak - a * t_dec
+    acc[mask_dec] = -a
+
+    # Handle negative displacement
+    if D < 0:
+        x = x0 - (x - x0)
+        v = -v
+        acc = -acc
+
+    return t, x, v, acc
+
 def design_scene() -> tuple[dict, list[list[float]]]:
     """Designs the scene."""
     # Ground-plane
@@ -79,39 +156,80 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
     sim_dt = sim.get_physics_dt()
     count = 0
     # Simulation loop
-    while simulation_app.is_running():
-        # Reset
-        if count % 500 == 0:
-            # reset counter
-            count = 0
-            # reset the scene entities
-            # root state
-            # we offset the root state by the origin since the states are written in simulation world frame
-            # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
-            root_state = robot.data.default_root_state.clone()
-            root_state[:, :3] += origins
-            robot.write_root_pose_to_sim(root_state[:, :7])
-            robot.write_root_velocity_to_sim(root_state[:, 7:])
-            # set joint positions with some noise
-            joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
-            joint_pos += torch.rand_like(joint_pos) * 0.1
-            robot.write_joint_state_to_sim(joint_pos, joint_vel)
-            # clear internal buffers
-            robot.reset()
-            print("[INFO]: Resetting robot state...")
-        # Apply random action
-        # -- generate random joint efforts
-        
-        # -- apply action to the robot
-        robot.set_joint_position_target(torch.zeros(1,12) + 0.2)
-        # -- write data to sim
-        robot.write_data_to_sim()
-        # Perform step
-        sim.step()
-        # Increment counter
-        count += 1
-        # Update buffers
-        robot.update(sim_dt)
+    
+    done = False
+
+    t, x, v, a = trapezoidal_trajectory_tensor(0, math.pi/2, VELOCITY_LIMIT, ACCELERATION_LIMIT, device=args_cli.device, dt=sim_dt)
+    with open("joint_positions.csv", mode="w", newline="") as f:
+        writer = csv.writer(f)
+        while simulation_app.is_running():
+            if count > len(x) - 2:
+                # # reset counter
+
+                for i in range(50):
+                    robot.set_joint_position_target(x[count - 1])
+                    # -- write data to sim
+                    robot.write_data_to_sim()
+                    joint_pos = robot.data.joint_pos[0]
+                    joint_vel = robot.data.joint_vel[0]
+                    # print(f'real joint pos {joint_pos[1]}')
+
+                    joint_vel = joint_vel.tolist()
+                    joint_vel.append(v[count].item())
+
+                    writer.writerow(joint_pos.tolist() + joint_vel)
+                    # Perform step
+                    sim.step()
+                    # Increment counter
+                    # count += 1
+                    # Update buffers
+                    robot.update(sim_dt)
+                # count = 0
+                # # reset the scene entities
+                # # root state
+                # # we offset the root state by the origin since the states are written in simulation world frame
+                # # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
+                # root_state = robot.data.default_root_state.clone()
+                # root_state[:, :3] += origins
+                # robot.write_root_pose_to_sim(root_state[:, :7])
+                # robot.write_root_velocity_to_sim(root_state[:, 7:])
+                # # set joint positions with some noise
+                # joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
+                # joint_pos += torch.rand_like(joint_pos) * 0.1
+                # robot.write_joint_state_to_sim(joint_pos, joint_vel)
+                # # clear internal buffers
+                # robot.reset()
+                # print("[INFO]: Resetting robot state...")
+                f.close()
+                done = True
+                # simulation_app.close()\
+
+            # Apply random action
+            # -- generate random joint efforts
+            # print(f'target {x[count]}')
+            
+
+            if not done:
+            # -- apply action to the robot
+                robot.set_joint_effort_target(x[count])
+                # -- write data to sim
+                joint_pos = robot.data.joint_pos[0]
+                joint_vel = robot.data.joint_vel[0]
+                # print(f'real joint pos {joint_pos[1]}')
+
+                joint_vel = joint_vel.tolist()
+                joint_vel.append(v[count].item())
+
+                writer.writerow(joint_pos.tolist() + joint_vel)
+
+            robot.write_data_to_sim()
+            # Perform step
+            sim.step()
+            # Increment counter
+            count += 1
+            # Update buffers
+            robot.update(sim_dt)
+            print(sim_dt)
 
 
 def main():
